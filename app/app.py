@@ -48,7 +48,7 @@ query = st.text_area(
     height=100
 )
 
-if st.button("Send", type="primary") or query:
+if st.button("Send", type="primary"):
     if query and query.strip():
         with st.spinner("Processing..."):
             try:
@@ -56,6 +56,8 @@ if st.button("Send", type="primary") or query:
                 st.markdown(response)
             except Exception as e:
                 st.error(f"Error: {str(e)}")
+    else:
+        st.warning("Please enter a question.")
 
 if __name__ == "__main__":
     pass
