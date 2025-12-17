@@ -34,7 +34,7 @@ def ingest_pdf(pdf_path: str):
         
         # Add to vector store safely (embeddings will be generated automatically)
         print("Adding to vector store...")
-        total_added = add_documents_safely(vectorstore, documents, None)
+        total_added = add_documents_safely(vectorstore, documents)
         
         print(f"✅ Successfully ingested {total_added} chunks from {pdf_path}")
         

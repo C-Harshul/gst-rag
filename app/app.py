@@ -8,7 +8,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rag.chain import build_rag_chain
-from ingestion.embeddings import cf_embedder
+from ingestion.embeddings import CFWorkersAIEmbeddings, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, CF_EMBEDDINGS_MODEL
 from config.settings import GOOGLE_API_KEY
 
 # Configure Streamlit page
@@ -25,21 +25,26 @@ if not GOOGLE_API_KEY:
     st.error("Please set GOOGLE_API_KEY in your environment variables.")
     st.stop()
 
-# Initialize RAG chain
-@st.cache_resource
-def initialize_rag_chain():
-    """Initialize and cache the RAG chain."""
+# Initialize RAG chain function
+def initialize_rag_chain(force_refresh=True):
+    """
+    Initialize the RAG chain with completely fresh components.
+    
+    Args:
+        force_refresh: If True, forces a fresh connection to ChromaDB to avoid caching (default: True)
+    """
     try:
-        return build_rag_chain(cf_embedder)
+        # Create a completely fresh embedding client for each query
+        fresh_embedder = CFWorkersAIEmbeddings(
+            account_id=CLOUDFLARE_ACCOUNT_ID,
+            api_token=CLOUDFLARE_API_TOKEN,
+            model=CF_EMBEDDINGS_MODEL
+        )
+        # Force refresh to ensure we get the latest data from ChromaDB
+        return build_rag_chain(fresh_embedder, force_refresh=force_refresh)
     except Exception as e:
         st.error(f"Failed to initialize RAG chain: {str(e)}")
         return None
-
-rag_chain = initialize_rag_chain()
-
-if rag_chain is None:
-    st.error("Failed to initialize the system. Please check your configuration.")
-    st.stop()
 
 # Chat interface
 query = st.text_area(
@@ -52,8 +57,13 @@ if st.button("Send", type="primary"):
     if query and query.strip():
         with st.spinner("Processing..."):
             try:
-                response = rag_chain.invoke(query)
-                st.markdown(response)
+                # Build fresh chain on each query to get latest data
+                rag_chain = initialize_rag_chain()
+                if rag_chain is None:
+                    st.error("Failed to initialize the system. Please check your configuration.")
+                else:
+                    response = rag_chain.invoke(query)
+                    st.markdown(response)
             except Exception as e:
                 st.error(f"Error: {str(e)}")
     else:

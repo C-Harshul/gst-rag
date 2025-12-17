@@ -6,6 +6,7 @@ def ingest_pdf(pdf_path: str, embedding_client):
 
     vectordb = get_vectorstore(embedding_client)
     vectordb.add_documents(chunks)
-    vectordb.persist()
+    # Note: persist() is not needed when using HTTP client mode
+    # Documents are automatically persisted on the ChromaDB server
 
     return len(chunks)

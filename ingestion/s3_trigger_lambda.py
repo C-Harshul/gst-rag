@@ -35,14 +35,9 @@ def process_s3_pdf(bucket: str, key: str) -> Dict[str, Any]:
         documents = pdf_loader.load_from_s3(bucket, key)
         print(f"Created {len(documents)} chunks")
         
-        # Generate embeddings
-        print("Generating embeddings...")
-        texts = [doc.page_content for doc in documents]
-        embedding_vectors = embeddings.embed_documents(texts)
-        
-        # Add to vector store safely
+        # Add to vector store safely (embeddings will be generated automatically by LangChain)
         print("Adding to vector store...")
-        total_added = add_documents_safely(vectorstore, documents, embedding_vectors)
+        total_added = add_documents_safely(vectorstore, documents)
         
         print(f"✅ Successfully ingested {total_added} chunks from s3://{bucket}/{key}")
         

@@ -14,16 +14,20 @@ os.environ["LANGCHAIN_PROJECT"]=os.getenv("LANGCHAIN_PROJECT", "gst-rag-system")
 
 
 
-def build_rag_chain(embedding_client):
+def build_rag_chain(embedding_client, force_refresh=False):
     """
     Builds and returns the LangChain RAG pipeline:
     Retriever → Prompt → LLM → Output parser
+    
+    Args:
+        embedding_client: The embedding client to use
+        force_refresh: If True, forces a fresh connection to avoid caching (default: False)
     """
 
-    retriever = get_retriever(embedding_client)
+    retriever = get_retriever(embedding_client, force_refresh=force_refresh)
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash-lite",
+        model="gemini-2.5-flash",
         temperature=0
     )
 
