@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GST RAG Assistant</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🇮🇳 GST Assistant</h1>
+            <p>Ask questions about GST regulations and get AI-powered answers</p>
+        </header>
+        
+        <div class="chat-container">
+            <div id="messages" class="messages">
+                <div class="welcome-message">
+                    <p>👋 Welcome! Ask me anything about GST regulations.</p>
+                    <p class="examples">Try: "What is the GST rate for restaurant services?"</p>
+                </div>
+            </div>
+            
+            <form id="query-form" class="query-form">
+                <div class="input-wrapper">
+                    <textarea 
+                        id="question-input" 
+                        placeholder="Ask your question about GST regulations..."
+                        rows="3"
+                        required
+                    ></textarea>
+                    <button type="submit" id="submit-btn">
+                        <span id="btn-text">Send</span>
+                        <span id="btn-spinner" class="spinner" style="display: none;">⏳</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>
+
