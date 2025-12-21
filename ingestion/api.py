@@ -1,11 +1,14 @@
 """FastAPI endpoint for vectorizing PDFs from S3."""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from typing import Optional
 import os
 import sys
+import traceback
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,12 +33,35 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle request validation errors with detailed messages."""
+    errors = exc.errors()
+    error_details = []
+    for error in errors:
+        error_details.append({
+            "field": ".".join(str(loc) for loc in error["loc"]),
+            "message": error["msg"],
+            "type": error["type"]
+        })
+    
+    print(f"❌ Validation error on {request.url.path}: {error_details}")
+    return JSONResponse(
+        status_code=400,
+        content={
+            "detail": "Request validation failed",
+            "errors": error_details,
+            "body_received": str(exc.body) if hasattr(exc, 'body') else None
+        }
+    )
+
+
 class S3IngestRequest(BaseModel):
     """Request model for S3 PDF ingestion."""
-    bucket: str
-    key: str
-    chunk_size: Optional[int] = 1000
-    chunk_overlap: Optional[int] = 200
+    bucket: str = Field(..., description="S3 bucket name", min_length=1)
+    key: str = Field(..., description="S3 object key (file path)", min_length=1)
+    chunk_size: Optional[int] = Field(default=1000, ge=100, le=10000, description="Size of text chunks")
+    chunk_overlap: Optional[int] = Field(default=200, ge=0, le=1000, description="Overlap between chunks")
 
 
 class S3IngestResponse(BaseModel):
@@ -71,7 +97,19 @@ def ingest_s3_pdf(request: S3IngestRequest):
         if not request.key.lower().endswith('.pdf'):
             raise HTTPException(
                 status_code=400,
-                detail=f"File {request.key} is not a PDF file"
+                detail=f"File {request.key} is not a PDF file. Only .pdf files are supported."
+            )
+        
+        # Validate bucket and key are not empty
+        if not request.bucket or not request.bucket.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Bucket name cannot be empty"
+            )
+        if not request.key or not request.key.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="S3 key cannot be empty"
             )
         
         print(f"Processing S3 PDF: s3://{request.bucket}/{request.key}")
@@ -88,6 +126,12 @@ def ingest_s3_pdf(request: S3IngestRequest):
         print("Loading and chunking PDF from S3...")
         documents = pdf_loader.load_from_s3(request.bucket, request.key)
         print(f"Created {len(documents)} chunks")
+        
+        if not documents:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No content extracted from PDF at s3://{request.bucket}/{request.key}. The file may be empty or corrupted."
+            )
         
         # Add to vector store safely
         print("Adding to vector store...")
@@ -109,7 +153,9 @@ def ingest_s3_pdf(request: S3IngestRequest):
     except HTTPException:
         raise
     except Exception as e:
+        error_trace = traceback.format_exc()
         print(f"❌ Error processing s3://{request.bucket}/{request.key}: {str(e)}")
+        print(f"Traceback: {error_trace}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to process PDF: {str(e)}"

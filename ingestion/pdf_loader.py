@@ -6,8 +6,10 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 import boto3
+from botocore.exceptions import ClientError, NoCredentialsError
 import tempfile
 import os
+import urllib.parse
 
 
 class PDFLoader:
@@ -68,26 +70,68 @@ class PDFLoader:
             
         Returns:
             List of chunked documents
+            
+        Raises:
+            Exception: If S3 download or PDF processing fails
         """
         s3_client = boto3.client('s3')
+        tmp_file_path = None
         
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-            s3_client.download_fileobj(bucket, key, tmp_file)
-            tmp_file.flush()
+        try:
+            # URL decode the key in case it's encoded
+            decoded_key = urllib.parse.unquote(key)
             
-            documents = self.load_from_file(tmp_file.name)
+            print(f"Downloading from S3: bucket={bucket}, key={decoded_key}")
             
-            # Clean up temporary file
-            os.unlink(tmp_file.name)
-            
-            # Add S3 metadata to documents
-            for doc in documents:
-                doc.metadata.update({
-                    'source_bucket': bucket,
-                    'source_key': key,
-                })
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                tmp_file_path = tmp_file.name
+                # Use keyword arguments for clarity
+                s3_client.download_fileobj(
+                    Bucket=bucket,
+                    Key=decoded_key,
+                    Fileobj=tmp_file
+                )
+                tmp_file.flush()
                 
-            return documents
+                # Verify file was downloaded (check size)
+                file_size = os.path.getsize(tmp_file_path)
+                if file_size == 0:
+                    raise ValueError(f"Downloaded file from s3://{bucket}/{decoded_key} is empty")
+                
+                print(f"Downloaded {file_size} bytes from S3")
+                
+                documents = self.load_from_file(tmp_file_path)
+                
+                # Add S3 metadata to documents
+                for doc in documents:
+                    doc.metadata.update({
+                        'source_bucket': bucket,
+                        'source_key': decoded_key,
+                    })
+                    
+                return documents
+                
+        except NoCredentialsError:
+            raise Exception(f"AWS credentials not found. Please configure AWS credentials.")
+        except ClientError as e:
+            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+            if error_code == 'NoSuchKey':
+                raise FileNotFoundError(f"S3 object not found: s3://{bucket}/{key}")
+            elif error_code == 'NoSuchBucket':
+                raise ValueError(f"S3 bucket not found: {bucket}")
+            elif error_code == 'AccessDenied':
+                raise PermissionError(f"Access denied to s3://{bucket}/{key}. Check IAM permissions.")
+            else:
+                raise Exception(f"AWS S3 error ({error_code}): {str(e)}")
+        except Exception as e:
+            raise Exception(f"Failed to load PDF from S3 (s3://{bucket}/{key}): {str(e)}")
+        finally:
+            # Clean up temporary file
+            if tmp_file_path and os.path.exists(tmp_file_path):
+                try:
+                    os.unlink(tmp_file_path)
+                except Exception as e:
+                    print(f"Warning: Failed to delete temp file {tmp_file_path}: {e}")
             
     def extract_metadata(self, documents: List[Document]) -> Dict[str, Any]:
         """
