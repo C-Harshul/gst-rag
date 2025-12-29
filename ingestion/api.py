@@ -62,6 +62,7 @@ class S3IngestRequest(BaseModel):
     key: str = Field(..., description="S3 object key (file path)", min_length=1)
     chunk_size: Optional[int] = Field(default=1000, ge=100, le=10000, description="Size of text chunks")
     chunk_overlap: Optional[int] = Field(default=200, ge=0, le=1000, description="Overlap between chunks")
+    collection_name: Optional[str] = Field(default=None, description="Name of the collection to add the document to. Defaults to 'gst-regulations' if not provided")
 
 
 class S3IngestResponse(BaseModel):
@@ -87,7 +88,7 @@ def ingest_s3_pdf(request: S3IngestRequest):
     This endpoint can be called by a Lambda function to process PDFs uploaded to S3.
     
     Args:
-        request: S3IngestRequest containing bucket and key
+        request: S3IngestRequest containing bucket, key, and optional collection_name
         
     Returns:
         S3IngestResponse with processing results
@@ -112,15 +113,23 @@ def ingest_s3_pdf(request: S3IngestRequest):
                 detail="S3 key cannot be empty"
             )
         
+        # Determine collection name (default to "gst-regulations" if not provided)
+        collection_name = request.collection_name or "gst-regulations"
+        
         print(f"Processing S3 PDF: s3://{request.bucket}/{request.key}")
+        print(f"Using collection: {collection_name}")
         
         # Initialize components
+        print("Initializing PDFLoader...")
         pdf_loader = PDFLoader(
             chunk_size=request.chunk_size,
             chunk_overlap=request.chunk_overlap
         )
+        print("Initializing embeddings...")
         embeddings = GSTEmbeddings(cf_embedder)
-        vectorstore = get_vectorstore(cf_embedder)
+        print(f"Connecting to vectorstore with collection: {collection_name}...")
+        vectorstore = get_vectorstore(cf_embedder, collection_name=collection_name)
+        print("Vectorstore connection established.")
         
         # Load and chunk PDF from S3
         print("Loading and chunking PDF from S3...")

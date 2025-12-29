@@ -83,16 +83,21 @@ def add_documents_safely(
 # Vectorstore factory
 # =========================
 
-def get_vectorstore(embedding_client, force_refresh=False):
+def get_vectorstore(embedding_client, collection_name=None, force_refresh=False):
     """
     Always returns a fresh LangChain Chroma wrapper
     connected to the Chroma SERVER (not embedded).
     
     Args:
         embedding_client: The embedding client to use
+        collection_name: Name of the collection to use (defaults to COLLECTION_NAME from settings)
         force_refresh: If True, forces a fresh connection (default: False)
     """
+    # Use provided collection_name or fall back to default
+    if collection_name is None:
+        collection_name = COLLECTION_NAME
 
+    print(f"[get_vectorstore] Starting connection to ChromaDB for collection: {collection_name}")
     embeddings = GSTEmbeddings(embedding_client)
 
     # Connect to ChromaDB server - CHROMA_HOST must be configured
@@ -102,27 +107,33 @@ def get_vectorstore(embedding_client, force_refresh=False):
             "Please set CHROMA_HOST to connect to ChromaDB server."
         )
     
+    print(f"[get_vectorstore] CHROMA_HOST: {CHROMA_HOST}, CHROMA_PORT: {CHROMA_PORT}")
     client = None
     last_error = None
     
     # Try to create HTTP client - ChromaDB may require tenant/database to be created first
     # Try multiple approaches to connect
     # First, try to create/get tenant using AdminClient if available
+    print("[get_vectorstore] Attempting AdminClient connection...")
     try:
         admin_client = chromadb.AdminClient(
             host=CHROMA_HOST,
             port=CHROMA_PORT
         )
+        print("[get_vectorstore] AdminClient created, checking tenant/database...")
         # Try to create tenant and database if they don't exist
         try:
             admin_client.create_tenant("default_tenant")
-        except Exception:
-            pass  # Tenant might already exist
+            print("[get_vectorstore] Created default_tenant")
+        except Exception as e:
+            print(f"[get_vectorstore] Tenant might already exist: {str(e)}")
         try:
             admin_client.create_database("default_database", tenant="default_tenant")
-        except Exception:
-            pass  # Database might already exist
-    except Exception:
+            print("[get_vectorstore] Created default_database")
+        except Exception as e:
+            print(f"[get_vectorstore] Database might already exist: {str(e)}")
+    except Exception as e:
+        print(f"[get_vectorstore] AdminClient not available or failed: {str(e)}")
         pass  # AdminClient might not be available, continue with regular client
     
     connection_methods = [
@@ -168,15 +179,19 @@ def get_vectorstore(embedding_client, force_refresh=False):
             }
         ]
     
-    for method in connection_methods:
+    print(f"[get_vectorstore] Trying {len(connection_methods)} connection methods...")
+    for idx, method in enumerate(connection_methods, 1):
+            print(f"[get_vectorstore] Trying method {idx}/{len(connection_methods)}: {method['name']}...")
             try:
                 client = method["client"]()
+                print(f"[get_vectorstore] HttpClient created, testing connection...")
                 # Test connection by listing collections (this validates the connection)
                 _ = client.list_collections()
                 print(f"✓ Connected to ChromaDB server at {CHROMA_HOST}:{CHROMA_PORT} ({method['name']})")
                 break
             except Exception as e:
                 last_error = str(e)
+                print(f"[get_vectorstore] Method {idx} failed: {str(e)}")
                 continue
         
     if client is None:
@@ -193,46 +208,51 @@ def get_vectorstore(embedding_client, force_refresh=False):
         )
 
     # Optional sanity check - this also helps refresh the connection
+    print(f"[get_vectorstore] Checking collection '{collection_name}'...")
     try:
         # Always get a fresh collection reference to avoid caching
-        collection = client.get_collection(COLLECTION_NAME)
+        collection = client.get_collection(collection_name)
+        print(f"[get_vectorstore] Collection '{collection_name}' exists, getting count...")
         if force_refresh:
             # Force a fresh read from disk by:
             # 1. Getting a new collection reference
             # 2. Calling count() which forces a database query
             # 3. This ensures we see the latest documents
-            collection = client.get_collection(COLLECTION_NAME)
+            collection = client.get_collection(collection_name)
             doc_count = collection.count()  # Forces a fresh database read
             print(
-                f"Connected to collection '{COLLECTION_NAME}' "
+                f"Connected to collection '{collection_name}' "
                 f"({doc_count} documents) [fresh read]"
             )
         else:
             doc_count = collection.count()
             print(
-                f"Connected to collection '{COLLECTION_NAME}' "
+                f"Connected to collection '{collection_name}' "
                 f"({doc_count} documents)"
             )
-    except Exception:
+    except Exception as e:
         print(
-            f"Collection '{COLLECTION_NAME}' not found. "
-            f"It will be created on first write."
+            f"Collection '{collection_name}' not found. "
+            f"It will be created on first write. Error: {str(e)}"
         )
 
     # Create a fresh Chroma instance to avoid any caching
     # Each time this is called, it creates a new wrapper that will
     # query the server/disk for the latest data
+    print(f"[get_vectorstore] Creating Chroma vectorstore wrapper for collection '{collection_name}'...")
     max_retries = 2
     for attempt in range(max_retries):
         try:
             # When force_refresh is True, we need to ensure the Chroma wrapper
             # doesn't cache the collection. We do this by creating a completely
             # fresh wrapper each time.
+            print(f"[get_vectorstore] Attempt {attempt + 1}/{max_retries} to create Chroma wrapper...")
             vectorstore = Chroma(
                 client=client,
-                collection_name=COLLECTION_NAME,
+                collection_name=collection_name,
                 embedding_function=embeddings,
             )
+            print(f"[get_vectorstore] Chroma wrapper created successfully.")
             
             # If force_refresh, ensure the vectorstore has a fresh collection reference
             if force_refresh:
@@ -241,7 +261,7 @@ def get_vectorstore(embedding_client, force_refresh=False):
                 # to ensure it gets a fresh reference
                 try:
                     # Access the collection through the client to force a fresh read
-                    fresh_collection = client.get_collection(COLLECTION_NAME)
+                    fresh_collection = client.get_collection(collection_name)
                     # Update the vectorstore's internal collection reference
                     vectorstore._collection = fresh_collection
                     # Verify we can get a fresh count
