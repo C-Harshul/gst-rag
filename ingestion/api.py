@@ -133,13 +133,32 @@ def ingest_s3_pdf(request: S3IngestRequest):
         
         # Load and chunk PDF from S3
         print("Loading and chunking PDF from S3...")
-        documents = pdf_loader.load_from_s3(request.bucket, request.key)
-        print(f"Created {len(documents)} chunks")
+        try:
+            documents = pdf_loader.load_from_s3(request.bucket, request.key)
+            print(f"Created {len(documents)} chunks")
+        except ValueError as e:
+            # Handle unsupported PDF format errors
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot extract text from PDF at s3://{request.bucket}/{request.key}. {str(e)}"
+            )
+        except FileNotFoundError as e:
+            # Handle S3 object not found
+            raise HTTPException(
+                status_code=404,
+                detail=str(e)
+            )
+        except PermissionError as e:
+            # Handle permission errors
+            raise HTTPException(
+                status_code=403,
+                detail=str(e)
+            )
         
         if not documents:
             raise HTTPException(
                 status_code=400,
-                detail=f"No content extracted from PDF at s3://{request.bucket}/{request.key}. The file may be empty or corrupted."
+                detail=f"No content extracted from PDF at s3://{request.bucket}/{request.key}. The file may be empty, corrupted, password-protected, or in an unsupported format."
             )
         
         # Add to vector store safely
