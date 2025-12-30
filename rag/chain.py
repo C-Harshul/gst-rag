@@ -300,7 +300,7 @@ def build_rag_chain(embedding_client, collection_name=None, force_refresh=False,
     cases_retriever = get_retriever(embedding_client, collection_name="Cases", force_refresh=force_refresh)
 
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash-lite",
+        model="gemini-2.5-flash",
         temperature=0
     )
 
