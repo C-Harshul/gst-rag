@@ -64,15 +64,16 @@ def extract_date_from_metadata(doc) -> Optional[str]:
     return None
 
 
-def format_document_citation(doc, collection_name: str, doc_index: int) -> str:
+def format_document_citation(doc, collection_name: str, doc_index: int, include_line_number: bool = False) -> str:
     """
     Format a detailed citation for a document including date and page number.
     Returns citation as a footnote-style reference below the content.
     
     Args:
         doc: Document object with metadata
-        collection_name: Name of the collection (e.g., "EY-Papers", "Cases")
+        collection_name: Name of the collection (e.g., "EY-Papers", "Cases", "Bare-Law")
         doc_index: Index of the document in the retrieval results
+        include_line_number: If True, includes line number in citation (for Bare-Law)
         
     Returns:
         Formatted citation string to appear below content
@@ -99,6 +100,27 @@ def format_document_citation(doc, collection_name: str, doc_index: int) -> str:
         page = doc.metadata.get('page')
         if page is not None:
             citation_parts.append(f"Page: {page + 1}")  # Convert 0-indexed to 1-indexed
+    
+    # Add line number for Bare-Law collection
+    if include_line_number:
+        line_num = None
+        if hasattr(doc, 'metadata'):
+            # Try to get line number from metadata
+            line_num = doc.metadata.get('line_number') or doc.metadata.get('line')
+            if line_num is None and hasattr(doc, 'page_content'):
+                # Calculate approximate line number from content position
+                # This is an approximation - assumes content starts at beginning of page
+                content_lines = doc.page_content.split('\n')
+                if content_lines:
+                    # Estimate line number based on first non-empty line
+                    for idx, line in enumerate(content_lines[:5], 1):
+                        if line.strip():
+                            line_num = idx
+                            break
+                    if line_num is None:
+                        line_num = 1
+        if line_num is not None:
+            citation_parts.append(f"Line: {line_num}")
     
     # Format as reference
     citation_text = ", ".join(citation_parts) if citation_parts else "Unknown source"
@@ -280,54 +302,277 @@ def format_conversation_history(history: List[Tuple[str, str]]) -> str:
     return "\n\n".join(formatted_history)
 
 
-def build_rag_chain(embedding_client, collection_name=None, force_refresh=False, conversation_history: Optional[List[Tuple[str, str]]] = None):
+def format_bare_law_citation_with_lines(doc, doc_index: int) -> str:
     """
-    Builds and returns the LangChain RAG pipeline with two-step retrieval and conversation memory:
-    1. First retrieves from EY-Papers collection
-    2. Extracts case numbers and retrieves from Cases collection
-    3. Combines both contexts to answer the question
-    4. Includes conversation history for context
+    Format a detailed citation for Bare-Law collection with line-by-line references.
+    Each line in the content is quoted with its citation.
+    
+    Args:
+        doc: Document object with metadata
+        doc_index: Index of the document in the retrieval results
+        
+    Returns:
+        Formatted citation string with line-by-line quotes
+    """
+    citation_parts = []
+    
+    # Get document name
+    filename = None
+    if hasattr(doc, 'metadata'):
+        filename = doc.metadata.get('source_file') or doc.metadata.get('source', '')
+        if filename:
+            filename = filename.split('/')[-1]
+            citation_parts.append(f"Document: {filename}")
+    
+    # Get page number
+    page = None
+    if hasattr(doc, 'metadata') and 'page' in doc.metadata:
+        page = doc.metadata.get('page')
+        if page is not None:
+            page = page + 1  # Convert 0-indexed to 1-indexed
+            citation_parts.append(f"Page: {page}")
+    
+    # Format base citation
+    base_citation = ", ".join(citation_parts) if citation_parts else "Unknown source"
+    
+    # Format content with line-by-line citations
+    if hasattr(doc, 'page_content') and doc.page_content:
+        lines = doc.page_content.split('\n')
+        formatted_lines = []
+        
+        # Try to get starting line number from metadata
+        start_line = 1
+        if hasattr(doc, 'metadata'):
+            start_line = doc.metadata.get('start_line') or doc.metadata.get('line_start') or 1
+            try:
+                start_line = int(start_line)
+            except (ValueError, TypeError):
+                start_line = 1
+        
+        current_line_num = start_line
+        
+        for line in lines:
+            if line.strip():  # Only include non-empty lines
+                # Quote the line and add citation with book name
+                quoted_line = f'"{line.strip()}"'
+                # Format: [ref] Bare-Law Book - Document: filename, Page: X, Line: Y
+                line_citation = f"[{doc_index}] Bare-Law Book - {base_citation}, Line: {current_line_num}"
+                formatted_lines.append(f"{quoted_line}\n{line_citation}")
+                current_line_num += 1
+        
+        return "\n\n".join(formatted_lines)
+    
+    # Fallback if no content
+    return f"[{doc_index}] Bare-Law Book - {base_citation}"
+
+
+def smart_assistant_retrieval(input_dict: Dict[str, Any], handbook_retriever, bare_law_retriever, llm=None) -> Dict[str, Any]:
+    """
+    Smart assistant retrieval process:
+    1. Check Handbook collection for relevant context (for reasoning only, NOT for citations)
+    2. If useful context found, use it for understanding the topic
+    3. Retrieve line-by-line clauses from Bare-Law collection (for citations only)
+    4. Format Bare-Law with exact page number and line citations with quotes
+    
+    Args:
+        input_dict: Dictionary containing the question
+        handbook_retriever: Retriever for Handbook collection (used for reasoning only)
+        bare_law_retriever: Retriever for Bare-Law collection (used for citations)
+        llm: Optional LLM for relevance checking
+        
+    Returns:
+        Dictionary with combined context, question, and source counts
+        Note: Handbook context is included without citations, Bare-Law context includes citations
+    """
+    question = input_dict.get("question", "")
+    
+    # Step 1: Check Handbook collection for relevant context
+    print("Step 1: Checking Handbook collection for relevant context...")
+    handbook_docs = handbook_retriever.invoke(question)
+    
+    # Ensure it's a list
+    if not isinstance(handbook_docs, list):
+        handbook_docs = [handbook_docs] if handbook_docs else []
+    
+    handbook_context = ""
+    handbook_context_parts = []
+    ref_counter = 1
+    
+    if handbook_docs:
+        print(f"Found {len(handbook_docs)} relevant documents in Handbook collection")
+        
+        # Use LLM to check if the handbook context is useful
+        if llm and len(handbook_docs) > 0:
+            # Combine handbook content for relevance check
+            handbook_text = "\n\n".join([doc.page_content for doc in handbook_docs[:3]])
+            relevance_prompt = f"""Given the following question and context from a handbook, determine if the handbook context is useful and relevant for answering the question.
+
+Question: {question}
+
+Handbook Context:
+{handbook_text[:2000]}
+
+Is this handbook context useful and relevant? Answer with just 'YES' or 'NO'."""
+            
+            try:
+                relevance_check = llm.invoke(relevance_prompt)
+                is_relevant = "YES" in str(relevance_check).upper()
+                print(f"Handbook relevance check: {'RELEVANT' if is_relevant else 'NOT RELEVANT'}")
+            except Exception as e:
+                print(f"Relevance check failed, assuming relevant: {str(e)}")
+                is_relevant = True
+        else:
+            is_relevant = True  # Assume relevant if no LLM available
+        
+        if is_relevant:
+            # Format handbook context WITHOUT citations - only for reasoning
+            for doc in handbook_docs:
+                handbook_context_parts.append(doc.page_content)
+            
+            handbook_context = "\n\n---\n\n".join(handbook_context_parts)
+            print("Using Handbook context for reasoning (not for citations)")
+        else:
+            print("Handbook context not relevant, skipping")
+    else:
+        print("No relevant documents found in Handbook collection")
+    
+    # Step 2: Retrieve from Bare-Law collection with line-by-line citations
+    print("Step 2: Retrieving line-by-line clauses from Bare-Law collection...")
+    
+    # Enhance query with handbook context if available (for better retrieval)
+    if handbook_context:
+        enhanced_query = f"{question}\n\nContext from Handbook: {handbook_context[:500]}"
+    else:
+        enhanced_query = question
+    
+    bare_law_docs = bare_law_retriever.invoke(enhanced_query)
+    
+    # Ensure it's a list
+    if not isinstance(bare_law_docs, list):
+        bare_law_docs = [bare_law_docs] if bare_law_docs else []
+    
+    bare_law_context_parts = []
+    bare_law_doc_count = len(bare_law_docs)
+    ref_counter = 1  # Start reference counter for Bare-Law citations only
+    
+    if bare_law_docs:
+        print(f"Retrieved {bare_law_doc_count} documents from Bare-Law collection")
+        
+        # Format each document with line-by-line citations and quotes
+        for doc in bare_law_docs:
+            formatted_content = format_bare_law_citation_with_lines(doc, ref_counter)
+            bare_law_context_parts.append(formatted_content)
+            ref_counter += 1
+        
+        bare_law_context = "\n\n---\n\n".join(bare_law_context_parts)
+    else:
+        bare_law_context = ""
+        print("No documents found in Bare-Law collection")
+    
+    # Step 3: Combine contexts with clear section headers
+    context_sections = []
+    
+    if handbook_context:
+        context_sections.append(f"=== Handbook Collection (For Reasoning Only - DO NOT Cite) ===\n{handbook_context}")
+    
+    if bare_law_context:
+        context_sections.append(f"=== Bare-Law Book (For Citations with Page and Line Numbers) ===\n{bare_law_context}")
+    
+    combined_context = "\n\n".join(context_sections) if context_sections else "No relevant context found."
+    
+    print(f"Combined context length: {len(combined_context)} characters")
+    
+    return {
+        "context": combined_context,
+        "question": question,
+        "sources": {
+            "Handbook": len(handbook_docs) if handbook_context else 0,
+            "Bare-Law": bare_law_doc_count
+        }
+    }
+
+
+def build_rag_chain(embedding_client, collection_name=None, force_refresh=False, conversation_history: Optional[List[Tuple[str, str]]] = None, use_smart_assistant: bool = True):
+    """
+    Builds and returns the LangChain RAG pipeline with smart assistant retrieval:
+    1. Checks Handbook collection for relevant context (for reasoning only, NOT for citations)
+    2. If useful context found, uses it for understanding the topic
+    3. Retrieves line-by-line clauses from Bare-Law collection (for citations only)
+    4. Formats Bare-Law with exact page number and line citations with quotes
+    5. Includes conversation history for context
     
     Args:
         embedding_client: The embedding client to use
         collection_name: Not used in this implementation (kept for backward compatibility)
         force_refresh: If True, forces a fresh connection to avoid caching (default: False)
         conversation_history: List of (question, answer) tuples from previous conversation turns
+        use_smart_assistant: If True, uses smart assistant retrieval with Handbook (reasoning) and Bare-Law (citations) (default: True)
+                            If False, uses legacy EY-Papers and Cases retrieval
     """
     
-    # Create retrievers for both collections
-    ey_papers_retriever = get_retriever(embedding_client, collection_name="EY-Papers", force_refresh=force_refresh)
-    cases_retriever = get_retriever(embedding_client, collection_name="Cases", force_refresh=force_refresh)
-
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         temperature=0
     )
 
-    # Create a class to store sources for each invocation
-    class SourceTracker:
-        def __init__(self):
-            self.sources = {"EY-Papers": 0, "Cases": 0}
+    if use_smart_assistant:
+        # Create retrievers for Handbook and Bare-Law collections
+        handbook_retriever = get_retriever(embedding_client, collection_name="Handbook", k=3, force_refresh=force_refresh)
+        bare_law_retriever = get_retriever(embedding_client, collection_name="Bare-Law", k=5, force_refresh=force_refresh)
         
-        def update(self, sources: Dict[str, int]):
-            self.sources.update(sources)
+        # Create a class to store sources for each invocation
+        class SourceTracker:
+            def __init__(self):
+                self.sources = {"Handbook": 0, "Bare-Law": 0}
+            
+            def update(self, sources: Dict[str, int]):
+                self.sources.update(sources)
+            
+            def get(self):
+                return self.sources.copy()
         
-        def get(self):
-            return self.sources.copy()
-    
-    source_tracker = SourceTracker()
-    
-    # Format conversation history if provided
-    history_text = format_conversation_history(conversation_history or [])
-    
-    # Create a lambda function that performs multi-collection retrieval
-    def retrieve_from_collections(input_dict: Dict[str, Any]) -> Dict[str, Any]:
-        result = multi_collection_retrieval(input_dict, ey_papers_retriever, cases_retriever, llm=llm)
-        # Store sources for later retrieval
-        source_tracker.update(result.get("sources", {}))
-        # Add conversation history to the result
-        result["conversation_history"] = history_text
-        return result
+        source_tracker = SourceTracker()
+        
+        # Format conversation history if provided
+        history_text = format_conversation_history(conversation_history or [])
+        
+        # Create a lambda function that performs smart assistant retrieval
+        def retrieve_from_collections(input_dict: Dict[str, Any]) -> Dict[str, Any]:
+            result = smart_assistant_retrieval(input_dict, handbook_retriever, bare_law_retriever, llm=llm)
+            # Store sources for later retrieval
+            source_tracker.update(result.get("sources", {}))
+            # Add conversation history to the result
+            result["conversation_history"] = history_text
+            return result
+    else:
+        # Legacy mode: EY-Papers and Cases collections
+        ey_papers_retriever = get_retriever(embedding_client, collection_name="EY-Papers", force_refresh=force_refresh)
+        cases_retriever = get_retriever(embedding_client, collection_name="Cases", force_refresh=force_refresh)
+        
+        # Create a class to store sources for each invocation
+        class SourceTracker:
+            def __init__(self):
+                self.sources = {"EY-Papers": 0, "Cases": 0}
+            
+            def update(self, sources: Dict[str, int]):
+                self.sources.update(sources)
+            
+            def get(self):
+                return self.sources.copy()
+        
+        source_tracker = SourceTracker()
+        
+        # Format conversation history if provided
+        history_text = format_conversation_history(conversation_history or [])
+        
+        # Create a lambda function that performs multi-collection retrieval
+        def retrieve_from_collections(input_dict: Dict[str, Any]) -> Dict[str, Any]:
+            result = multi_collection_retrieval(input_dict, ey_papers_retriever, cases_retriever, llm=llm)
+            # Store sources for later retrieval
+            source_tracker.update(result.get("sources", {}))
+            # Add conversation history to the result
+            result["conversation_history"] = history_text
+            return result
 
     chain = (
         {
