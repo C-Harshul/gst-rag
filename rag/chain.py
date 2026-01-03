@@ -366,6 +366,48 @@ def format_bare_law_citation_with_lines(doc, doc_index: int) -> str:
     return f"[{doc_index}] Bare-Law Book - {base_citation}"
 
 
+def is_direct_factual_question(question: str) -> bool:
+    """
+    Determine if a question is a direct factual question that should use the 'in detail' query enhancement.
+    
+    Args:
+        question: The question string
+        
+    Returns:
+        True if it's a direct factual question, False otherwise
+    """
+    question_lower = question.lower().strip()
+    
+    # Patterns that indicate direct factual questions
+    direct_question_patterns = [
+        r'^what is',
+        r'^what are',
+        r'^what does',
+        r'^what do',
+        r'^explain',
+        r'^define',
+        r'^describe',
+        r'^tell me about',
+        r'^what is section',
+        r'^what are the',
+        r'^what does section',
+        r'^how is',
+        r'^how are',
+        r'^who is',
+        r'^who are',
+        r'^when is',
+        r'^when are',
+        r'^where is',
+        r'^where are',
+    ]
+    
+    for pattern in direct_question_patterns:
+        if re.match(pattern, question_lower):
+            return True
+    
+    return False
+
+
 def smart_assistant_retrieval(input_dict: Dict[str, Any], handbook_retriever, bare_law_retriever, llm=None) -> Dict[str, Any]:
     """
     Smart assistant retrieval process:
@@ -439,12 +481,24 @@ Is this handbook context useful and relevant? Answer with just 'YES' or 'NO'."""
     # Step 2: Retrieve from Bare-Law collection with line-by-line citations
     print("Step 2: Retrieving line-by-line clauses from Bare-Law collection...")
     
-    # Enhance query with handbook context if available (for better retrieval)
-    if handbook_context:
-        enhanced_query = f"{question}\n\nContext from Handbook: {handbook_context[:500]}"
+    # For direct factual questions, create an enhanced query with "in detail" appended
+    if is_direct_factual_question(question):
+        print("Detected direct factual question - using enhanced query with 'in detail'")
+        detailed_query = f"{question} in detail"
+        
+        # Enhance query with handbook context if available (for better retrieval)
+        if handbook_context:
+            enhanced_query = f"{detailed_query}\n\nContext from Handbook: {handbook_context[:500]}"
+        else:
+            enhanced_query = detailed_query
     else:
-        enhanced_query = question
+        # For non-direct questions, use original query
+        if handbook_context:
+            enhanced_query = f"{question}\n\nContext from Handbook: {handbook_context[:500]}"
+        else:
+            enhanced_query = question
     
+    print(f"Using query for Bare-Law retrieval: {enhanced_query[:100]}...")
     bare_law_docs = bare_law_retriever.invoke(enhanced_query)
     
     # Ensure it's a list
