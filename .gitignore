@@ -18,6 +18,10 @@ pdfs/
 .env.local
 .env.production
 
+# Google Sheets Credentials
+google_sheets_credentials.json
+*google_sheets_credentials*.json
+
 # Python
 __pycache__/
 *.py[cod]

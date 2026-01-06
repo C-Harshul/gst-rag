@@ -16,6 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from rag.chain import build_rag_chain
 from rag.clarification import detect_clarification, combine_question_with_clarification
+from rag.google_sheets_logger import log_to_google_sheets
 from ingestion.embeddings import CFWorkersAIEmbeddings, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, CF_EMBEDDINGS_MODEL
 from config.settings import GOOGLE_API_KEY
 
@@ -270,11 +271,29 @@ async def query_rag(request: QueryRequest):
                 question=request.question,
                 session_id=session_id
             )
+            # Log to Google Sheets
+            try:
+                log_to_google_sheets(
+                    username=request.username,
+                    question=request.question,
+                    session_id=session_id
+                )
+            except Exception as e:
+                print(f"[QUERY LOG] Failed to log to Google Sheets: {str(e)}")
         else:
             # Log even if no username provided (for tracking anonymous queries)
             print(f"[QUERY LOG] No username provided in request - logging as Anonymous")
             print(f"[QUERY LOG] User: Anonymous | Session: {session_id} | Question: {request.question[:100]}...")
             print(f"[QUERY LOG] Timestamp: {datetime.now().isoformat()}")
+            # Log anonymous queries to Google Sheets too
+            try:
+                log_to_google_sheets(
+                    username="Anonymous",
+                    question=request.question,
+                    session_id=session_id
+                )
+            except Exception as e:
+                print(f"[QUERY LOG] Failed to log to Google Sheets: {str(e)}")
         
         # Check if there's a pending clarification for this session
         pending_clarification = get_pending_clarification(session_id)
