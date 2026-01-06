@@ -1,6 +1,88 @@
 // API Configuration
 const API_URL = 'http://localhost:8002'; // Change to your API URL if different
 
+// Session management
+let currentSessionId = null;
+let pendingClarification = null;
+let currentUsername = null;
+
+// Initialize: Check for stored username or show modal
+function initializeApp() {
+    // Check if username is stored in localStorage
+    const storedUsername = localStorage.getItem('gst_username');
+    
+    if (storedUsername) {
+        currentUsername = storedUsername;
+        showMainApp();
+    } else {
+        showUsernameModal();
+    }
+}
+
+function showUsernameModal() {
+    const modal = document.getElementById('username-modal');
+    const mainContainer = document.getElementById('main-container');
+    
+    if (modal) {
+        modal.style.display = 'flex';
+    }
+    if (mainContainer) {
+        mainContainer.style.display = 'none';
+    }
+}
+
+function showMainApp() {
+    const modal = document.getElementById('username-modal');
+    const mainContainer = document.getElementById('main-container');
+    const usernameDisplay = document.getElementById('username-display');
+    
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    if (mainContainer) {
+        mainContainer.style.display = 'flex';
+    }
+    if (usernameDisplay && currentUsername) {
+        usernameDisplay.textContent = currentUsername;
+    }
+}
+
+// Handle username form submission
+const usernameForm = document.getElementById('username-form');
+if (usernameForm) {
+    usernameForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        
+        const usernameInput = document.getElementById('username-input');
+        const username = usernameInput.value.trim();
+        
+        if (username) {
+            currentUsername = username;
+            localStorage.setItem('gst_username', username);
+            showMainApp();
+        }
+    });
+}
+
+// Handle change user button
+const changeUserBtn = document.getElementById('change-user-btn');
+if (changeUserBtn) {
+    changeUserBtn.addEventListener('click', () => {
+        localStorage.removeItem('gst_username');
+        currentUsername = null;
+        currentSessionId = null;
+        pendingClarification = null;
+        showUsernameModal();
+    });
+}
+
+// Initialize app on load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeApp);
+} else {
+    initializeApp();
+}
+
 // DOM Elements
 const form = document.getElementById('query-form');
 const questionInput = document.getElementById('question-input');
@@ -38,15 +120,27 @@ form.addEventListener('submit', async (e) => {
     setLoading(true);
     
     try {
+        const requestBody = {
+            question: question,
+            force_refresh: false
+        };
+        
+        // Include session_id if we have one
+        if (currentSessionId) {
+            requestBody.session_id = currentSessionId;
+        }
+        
+        // Include username if we have one
+        if (currentUsername) {
+            requestBody.username = currentUsername;
+        }
+        
         const response = await fetch(`${API_URL}/query`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-                question: question,
-                force_refresh: false
-            })
+            body: JSON.stringify(requestBody)
         });
         
         if (!response.ok) {
@@ -55,7 +149,28 @@ form.addEventListener('submit', async (e) => {
         }
         
         const data = await response.json();
-        addMessage(data.answer, 'assistant');
+        
+        // Store session_id for future requests
+        if (data.session_id) {
+            currentSessionId = data.session_id;
+        }
+        
+        // Handle clarification state
+        if (data.requires_clarification) {
+            pendingClarification = {
+                question: data.pending_question,
+                clarification: data.clarification_question
+            };
+            updateClarificationUI(true);
+            addMessage(data.answer, 'assistant', true);
+        } else {
+            // Clear clarification state if we got a normal answer
+            if (pendingClarification) {
+                pendingClarification = null;
+                updateClarificationUI(false);
+            }
+            addMessage(data.answer, 'assistant', false);
+        }
         
     } catch (error) {
         console.error('Error:', error);
@@ -68,9 +183,14 @@ form.addEventListener('submit', async (e) => {
     }
 });
 
-function addMessage(text, type) {
+function addMessage(text, type, isClarification = false) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${type}`;
+    
+    // Add clarification indicator class if needed
+    if (isClarification) {
+        messageDiv.classList.add('clarification-needed');
+    }
     
     const content = document.createElement('div');
     content.className = 'message-content';
@@ -83,11 +203,31 @@ function addMessage(text, type) {
     
     content.innerHTML = formattedText.replace(/\n/g, '<br>');
     
+    // Add clarification badge if needed
+    if (isClarification) {
+        const badge = document.createElement('div');
+        badge.className = 'clarification-badge';
+        badge.textContent = '⚠️ Clarification Needed';
+        messageDiv.appendChild(badge);
+    }
+    
     messageDiv.appendChild(content);
     messagesDiv.appendChild(messageDiv);
     
     // Scroll to bottom
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function updateClarificationUI(needsClarification) {
+    if (needsClarification && pendingClarification) {
+        // Update placeholder to indicate clarification is needed
+        questionInput.placeholder = `Please answer: ${pendingClarification.clarification}`;
+        questionInput.classList.add('clarification-pending');
+    } else {
+        // Reset placeholder
+        questionInput.placeholder = 'Ask your question about GST regulations...';
+        questionInput.classList.remove('clarification-pending');
+    }
 }
 
 function setLoading(loading) {

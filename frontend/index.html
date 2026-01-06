@@ -7,10 +7,32 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
+    <!-- Username Modal -->
+    <div id="username-modal" class="username-modal">
+        <div class="username-modal-content">
+            <h2>Welcome to GST Assistant</h2>
+            <p>Please enter your name to continue</p>
+            <form id="username-form">
+                <input 
+                    type="text" 
+                    id="username-input" 
+                    placeholder="Enter your name"
+                    required
+                    autofocus
+                />
+                <button type="submit" id="username-submit-btn">Continue</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="container" id="main-container" style="display: none;">
         <header>
             <h1>🇮🇳 GST Assistant</h1>
             <p>Ask questions about GST regulations and get AI-powered answers</p>
+            <div class="user-info">
+                <span id="user-display">👤 <span id="username-display"></span></span>
+                <button id="change-user-btn" class="change-user-btn">Change User</button>
+            </div>
         </header>
         
         <div class="chat-container">

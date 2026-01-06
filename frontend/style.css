@@ -151,6 +151,144 @@ header p {
     border-bottom-left-radius: 4px;
 }
 
+/* Clarification styles */
+.message.clarification-needed {
+    position: relative;
+}
+
+.clarification-badge {
+    position: absolute;
+    top: -8px;
+    left: 10px;
+    background: #ff9800;
+    color: white;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.75em;
+    font-weight: 600;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    z-index: 1;
+}
+
+.message.clarification-needed .message-content {
+    border: 2px solid #ff9800;
+    background: #fff8e1;
+}
+
+#question-input.clarification-pending {
+    border-color: #ff9800;
+    background: #fff8e1;
+}
+
+#question-input.clarification-pending:focus {
+    border-color: #ff9800;
+    box-shadow: 0 0 0 3px rgba(255, 152, 0, 0.1);
+}
+
+/* Username Modal Styles */
+.username-modal {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    z-index: 1000;
+}
+
+.username-modal-content {
+    background: white;
+    padding: 40px;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    max-width: 400px;
+    width: 90%;
+    text-align: center;
+}
+
+.username-modal-content h2 {
+    margin-bottom: 10px;
+    color: #333;
+    font-size: 1.8em;
+}
+
+.username-modal-content p {
+    margin-bottom: 30px;
+    color: #666;
+    font-size: 1.1em;
+}
+
+#username-form {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+#username-input {
+    padding: 14px;
+    border: 2px solid #e0e0e0;
+    border-radius: 12px;
+    font-size: 16px;
+    font-family: inherit;
+    transition: border-color 0.2s;
+}
+
+#username-input:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+#username-submit-btn {
+    padding: 14px 28px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+#username-submit-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+/* User Info in Header */
+.user-info {
+    margin-top: 15px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+#user-display {
+    font-size: 0.9em;
+    opacity: 0.9;
+}
+
+.change-user-btn {
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 8px;
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.change-user-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
 .query-form {
     padding: 20px;
     border-top: 1px solid #e0e0e0;
